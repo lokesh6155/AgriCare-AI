@@ -1,0 +1,9 @@
+streamlit
+gtts
+transformers
+torch
+torchvision
+Pillow
+numpy
+pandas
+requests

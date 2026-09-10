@@ -121,134 +121,154 @@ def read_uploaded_image(uploaded_file):
 
 
 def image_is_reasonable(image):
-    """
-    Basic image validation.
-    """
-
+    """Validate image size and estimate whether it is useful for leaf AI."""
     if image is None:
         return False, "No image selected."
-
     width, height = image.size
+    if width < 224 or height < 224:
+        return False, "Image is too small. Please upload a clear leaf photo (at least 224×224)."
 
-    if width < 100 or height < 100:
-
-        return (
-            False,
-            "Image is too small. Please upload a clearer image."
-        )
-
+    # A simple sharpness check helps prevent blurry photos from producing misleading
+    # high-confidence model predictions. This does not diagnose disease.
+    try:
+        gray = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        if sharpness < 25:
+            return False, "Image is too blurry for reliable AI detection. Please take a sharper close-up photo of the leaf."
+    except Exception:
+        pass
     return True, ""
+
+
+def assess_image_quality(image):
+    """Return transparent quality indicators used by the AI result screen."""
+    try:
+        rgb = np.array(image.convert("RGB"))
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        brightness = float(gray.mean())
+        if sharpness < 25:
+            quality = "Poor — blurry"
+        elif sharpness < 80:
+            quality = "Fair — retake if possible"
+        elif brightness < 35 or brightness > 225:
+            quality = "Fair — lighting may affect detection"
+        else:
+            quality = "Good"
+        return {"sharpness": round(sharpness, 1), "brightness": round(brightness, 1), "quality": quality}
+    except Exception:
+        return {"sharpness": None, "brightness": None, "quality": "Unknown"}
 
 
 # =========================================================
 # RUN AI PREDICTION
 # =========================================================
 
-def run_prediction(image):
+def model_crop_name(crop):
+    """Map the app crop name to the crop names used by the model."""
+    mapping = {
+        "Maize": "Maize",
+        "Tomato": "Tomato",
+        "Chilli": "Chilli",
+        "Potato": "Potato",
+    }
+    return mapping.get(crop)
 
+
+def run_prediction(image, selected_crop=None):
+    """Run a more robust crop-aware prediction with simple test-time augmentation.
+
+    The model is evaluated on the original image and a horizontally flipped copy;
+    their probabilities are averaged. For supported crops, unrelated crop classes
+    are removed before the final decision. A consistency score is also returned so
+    the UI can warn when the model is unstable instead of presenting a false sense
+    of certainty.
+    """
     processor, model = load_ai_model()
-
     if not isinstance(image, Image.Image):
-
         image = read_uploaded_image(image)
-
     image = image.convert("RGB")
 
-    inputs = processor(
-        images=image,
-        return_tensors="pt"
-    )
-
+    quality = assess_image_quality(image)
+    augmented = [image, ImageOps.mirror(image)]
+    probability_list = []
     with torch.no_grad():
+        for img in augmented:
+            inputs = processor(images=img, return_tensors="pt")
+            outputs = model(**inputs)
+            probability_list.append(torch.softmax(outputs.logits, dim=-1)[0])
 
-        outputs = model(
-            **inputs
-        )
-
-        probabilities = torch.softmax(
-            outputs.logits,
-            dim=-1
-        )
-
-    # -----------------------------------------------------
-    # Top prediction
-    # -----------------------------------------------------
-
-    confidence_tensor, predicted_index_tensor = torch.max(
-        probabilities,
-        dim=-1
-    )
-
-    confidence = float(
-        confidence_tensor.item() * 100
-    )
-
-    predicted_index = int(
-        predicted_index_tensor.item()
-    )
-
-    # -----------------------------------------------------
-    # Get label safely
-    # -----------------------------------------------------
+    probabilities = torch.stack(probability_list).mean(dim=0)
+    consistency = float(1.0 - torch.mean(torch.abs(probability_list[0] - probability_list[1])).item())
+    consistency = max(0.0, min(1.0, consistency))
 
     label_map = model.config.id2label
+    labels = [str(label_map.get(i, label_map.get(str(i), str(i)))) for i in range(len(probabilities))]
 
-    predicted_label = label_map.get(
-        predicted_index,
-        label_map.get(
-            str(predicted_index),
-            str(predicted_index)
-        )
-    )
+    raw_index = int(torch.argmax(probabilities).item())
+    raw_label = labels[raw_index]
+    raw_confidence = float(probabilities[raw_index].item() * 100)
+    raw_crop = detect_crop_from_label(raw_label)
 
-    # -----------------------------------------------------
-    # Top 3 predictions
-    # -----------------------------------------------------
+    target_crop = model_crop_name(selected_crop) if selected_crop else None
+    allowed = []
+    if target_crop:
+        for i, label in enumerate(labels):
+            if detect_crop_from_label(label).lower() == target_crop.lower():
+                allowed.append(i)
 
-    number_of_classes = probabilities.shape[-1]
+    if allowed:
+        masked = torch.full_like(probabilities, float("-inf"))
+        idx_tensor = torch.tensor(allowed, dtype=torch.long)
+        masked[idx_tensor] = probabilities[idx_tensor]
+        selected_probabilities = torch.softmax(masked, dim=-1)
+        confidence_tensor, selected_index_tensor = torch.max(selected_probabilities, dim=0)
+        predicted_index = int(selected_index_tensor.item())
+        confidence = float(confidence_tensor.item() * 100)
+        crop_gated = True
+    else:
+        selected_probabilities = probabilities
+        confidence_tensor, selected_index_tensor = torch.max(probabilities, dim=0)
+        predicted_index = int(selected_index_tensor.item())
+        confidence = float(confidence_tensor.item() * 100)
+        crop_gated = False
 
-    top_k = min(
-        3,
-        number_of_classes
-    )
+    predicted_label = labels[predicted_index]
 
-    top_values, top_indices = torch.topk(
-        probabilities,
-        k=top_k,
-        dim=-1
-    )
+    # Reliability is deliberately separate from raw classifier confidence.
+    # A high softmax score alone does not prove a field diagnosis.
+    reliability = confidence
+    if consistency < 0.70:
+        reliability = min(reliability, 55)
+    elif consistency < 0.85:
+        reliability = min(reliability, 70)
+    if quality["quality"].startswith("Poor"):
+        reliability = min(reliability, 45)
+    elif quality["quality"].startswith("Fair"):
+        reliability = min(reliability, 70)
+
+    top_k = min(5, len(probabilities))
+    if crop_gated:
+        top_values, top_indices = torch.topk(selected_probabilities, k=min(5, len(allowed)))
+    else:
+        top_values, top_indices = torch.topk(probabilities, k=top_k)
 
     top_predictions = []
-
-    for value, index in zip(
-        top_values[0].tolist(),
-        top_indices[0].tolist()
-    ):
-
-        index = int(index)
-
-        top_label = label_map.get(
-            index,
-            label_map.get(
-                str(index),
-                str(index)
-            )
-        )
-
-        top_predictions.append(
-            {
-                "label": str(top_label),
-                "confidence": round(
-                    float(value) * 100,
-                    2
-                )
-            }
-        )
+    for value, index in zip(top_values.tolist(), top_indices.tolist()):
+        top_predictions.append({"label": labels[int(index)], "confidence": round(float(value) * 100, 2)})
 
     return {
-        "label": str(predicted_label),
+        "label": predicted_label,
         "confidence": round(confidence),
-        "top_predictions": top_predictions
+        "reliability": round(reliability),
+        "consistency": round(consistency * 100),
+        "image_quality": quality,
+        "top_predictions": top_predictions,
+        "raw_label": raw_label,
+        "raw_confidence": round(raw_confidence),
+        "raw_crop": raw_crop,
+        "crop_gated": crop_gated,
+        "selected_crop": selected_crop or "Not specified",
     }
 
 
@@ -346,8 +366,20 @@ def render_login_signup():
                 elif password != confirm_password: st.error("Passwords do not match.")
                 else:
                     created, message = create_user(display_name, username, password)
-                    if created: st.success(message + " You can now log in.")
-                    else: st.error(message)
+                    if created:
+                        user = authenticate_user(username, password)
+                        if user:
+                            st.session_state.authenticated = True
+                            st.session_state.guest_mode = False
+                            st.session_state.user_id = user["id"]
+                            st.session_state.username = user["username"]
+                            st.session_state.display_name = user["display_name"]
+                            st.session_state.quick_page = "Home"
+                            st.rerun()
+                        else:
+                            st.success("Account created successfully. Please use the Login tab.")
+                    else:
+                        st.error(message)
         st.markdown("---")
         st.subheader("🌾 Offline Activity")
         st.caption("You can open Offline Activity without creating an account.")
@@ -1344,6 +1376,94 @@ DISEASE_GUIDANCE = {
 
 
 # =========================================================
+# CROP-SPECIFIC AI TREATMENT DATABASE
+# =========================================================
+# Treatment is selected by BOTH crop and disease. Product names/doses vary by
+# country and formulation, so we provide active-ingredient examples and always
+# require the farmer to follow the locally registered product label.
+
+CROP_DISEASE_GUIDANCE = {
+    "Tomato": {
+        "healthy": {
+            "name": "Healthy Tomato",
+            "problem": "No disease class was identified with the available model.",
+            "treatment": ["No disease medicine is indicated from this scan.", "Continue regular scouting and balanced irrigation.", "Maintain good airflow and remove dead plant material."],
+            "prevention": ["Use healthy seedlings.", "Avoid prolonged leaf wetness.", "Monitor leaves, stems and fruits twice a week."]
+        },
+        "early blight": {
+            "name": "Tomato Early Blight",
+            "problem": "A fungal disease that commonly produces dark target-like spots, often beginning on older leaves.",
+            "treatment": ["Remove badly infected leaves and dispose of them away from the field.", "For registered fungicide control, products containing active ingredients such as chlorothalonil, mancozeb or an appropriate locally registered fungicide may be used according to the label.", "Rotate fungicide groups where the label permits; do not repeatedly use the same mode of action.", "Avoid overhead irrigation and keep foliage dry when possible."],
+            "prevention": ["Use clean planting material.", "Keep adequate plant spacing and airflow.", "Remove crop debris after harvest and rotate crops where practical."]
+        },
+        "late blight": {
+            "name": "Tomato Late Blight",
+            "problem": "A rapidly spreading disease favored by cool, wet conditions; dark water-soaked lesions may occur on leaves and fruit.",
+            "treatment": ["Remove and safely dispose of heavily infected plant material.", "For registered control, active ingredients such as mancozeb, chlorothalonil or other locally approved late-blight fungicides may be options depending on the label and resistance program.", "Start control early when disease risk is high rather than waiting for severe infection.", "Do not eat or sell produce contrary to the product label and observe the stated pre-harvest interval."],
+            "prevention": ["Improve airflow and drainage.", "Avoid prolonged leaf wetness.", "Scout frequently during cool, wet weather."]
+        },
+        "leaf spot": {
+            "name": "Tomato Leaf Spot",
+            "problem": "Leaf-spot symptoms can be caused by several pathogens and can resemble nutrient or environmental stress.",
+            "treatment": ["Remove severely affected leaves where practical.", "Use only a fungicide/bactericide registered for the confirmed tomato problem; active ingredients and rates must follow the local label.", "Improve airflow and avoid splashing water between plants."],
+            "prevention": ["Sanitize tools and remove infected debris.", "Use disease-free planting material.", "Rotate away from solanaceous crops where practical."]
+        }
+    },
+    # Additional classes returned by the PlantVillage-style model.
+    "_extra": {
+        "bacterial spot": {"name":"Bacterial Spot","problem":"Bacterial leaf spot can cause small dark or water-soaked lesions that enlarge under favorable conditions.","treatment":["Remove severely affected leaves where practical and avoid spreading contaminated water or tools.","Use only a locally registered bactericide for the confirmed crop disease; copper-based products are used for some bacterial diseases where registered.","Follow the product label and do not mix chemicals unless the label permits."],"prevention":["Use disease-free planting material.","Avoid overhead irrigation and work in dry foliage when possible."]},
+        "leaf mold": {"name":"Tomato Leaf Mold","problem":"Leaf mold commonly affects tomato foliage under high humidity and poor airflow.","treatment":["Improve ventilation and reduce prolonged leaf wetness.","Remove heavily infected leaves where practical.","Use a locally registered tomato fungicide only when the disease is confirmed and follow the label."],"prevention":["Improve spacing and airflow.","Avoid unnecessary overhead irrigation."]},
+        "septoria leaf spot": {"name":"Tomato Septoria Leaf Spot","problem":"Small circular leaf spots can enlarge and cause premature leaf loss.","treatment":["Remove infected lower leaves and crop debris where practical.","Use a locally registered tomato fungicide such as an approved protectant according to the label.","Avoid splashing soil onto foliage."],"prevention":["Rotate crops where practical.","Use clean seedlings and field sanitation."]},
+        "target spot": {"name":"Tomato Target Spot","problem":"Target-like concentric lesions can occur on tomato leaves and fruit.","treatment":["Remove badly affected material where practical.","Use only a locally registered fungicide for tomato target spot and rotate modes of action according to the label.","Improve airflow and reduce leaf wetness."],"prevention":["Maintain spacing and sanitation.","Scout early, especially in humid weather."]},
+        "spider mites": {"name":"Tomato Spider Mites","problem":"Spider mites can cause fine stippling, yellowing and sometimes webbing on leaves.","treatment":["Check leaf undersides with a close-up view before treatment.","Use non-chemical measures and conserve beneficial predators where possible.","If an acaricide is needed, use only a product registered for tomato mites and follow the label; do not spray an insecticide that is ineffective against mites."],"prevention":["Avoid severe plant water stress.","Scout leaf undersides regularly."]},
+        "yellow leaf curl": {"name":"Tomato Yellow Leaf Curl Virus","problem":"Virus symptoms can include upward leaf curling, yellowing and stunting; whiteflies can spread the virus.","treatment":["There is no curative chemical treatment that reverses an established viral infection.","Remove severely affected plants where practical to reduce sources of infection.","Manage whitefly vectors using integrated pest management and only locally registered products when needed."],"prevention":["Use healthy seedlings and resistant varieties where available.","Control volunteer hosts and monitor whiteflies early."]},
+        "mosaic": {"name":"Tomato Mosaic Virus","problem":"Mosaic viruses can cause mottled leaves, distortion and reduced growth; infected material can spread the virus.","treatment":["There is no curative pesticide that restores a virus-infected plant.","Remove severely infected plants where practical and sanitize hands/tools after handling.","Control insect vectors when relevant and use only registered products."],"prevention":["Use certified healthy planting material.","Control weeds/alternate hosts and sanitize tools."]},
+        "northern leaf blight": {"name":"Maize Northern Leaf Blight","problem":"Long cigar-shaped lesions can expand across maize leaves.","treatment":["Scout the crop and confirm symptoms before spraying.","If chemical control is justified, use only a locally registered maize fungicide and follow its label and resistance guidance.","Observe pre-harvest restrictions."],"prevention":["Use resistant/tolerant varieties where available.","Rotate crops and manage infected residue where practical."]},
+        "gray leaf spot": {"name":"Maize Gray Leaf Spot","problem":"Gray/tan rectangular lesions can expand along maize leaves, especially under humid conditions.","treatment":["Confirm the disease before chemical control.","Use only locally registered maize fungicides for gray leaf spot and follow the label.","Maintain balanced crop nutrition and avoid unnecessary leaf wetness."],"prevention":["Use tolerant varieties where available.","Rotate crops and manage residue."]},
+        "cercospora": {"name":"Maize Cercospora Gray Leaf Spot","problem":"Cercospora leaf spot can reduce green leaf area and yield when severe.","treatment":["Use only a locally registered fungicide if the disease is confirmed and economic control is justified.","Rotate fungicide modes of action according to the label.","Monitor the lower canopy early."],"prevention":["Use tolerant varieties.","Rotate crops and manage infected residue."]},
+        "common rust": {"name":"Maize Common Rust","problem":"Small reddish-brown rust pustules can develop on maize leaves.","treatment":["Confirm rust before treatment.","Where control is justified, use only a locally registered maize fungicide such as an approved triazole/strobilurin product according to the label.","Follow all label and pre-harvest requirements."],"prevention":["Use resistant varieties where available.","Scout early and avoid severe crop stress."]}
+    },
+    "Potato": {
+        "healthy": {"name":"Healthy Potato","problem":"No disease class was identified with the available model.","treatment":["No disease medicine is indicated from this scan.","Continue scouting and maintain balanced irrigation."],"prevention":["Use certified healthy seed tubers.","Maintain good field drainage and regular scouting."]},
+        "early blight": {"name":"Potato Early Blight","problem":"Early blight can produce dark lesions with concentric rings, especially on older foliage.","treatment":["Remove badly affected foliage where practical.","Registered fungicides containing active ingredients such as chlorothalonil, mancozeb or an approved alternative may be used according to the potato label and local resistance guidance.","Avoid unnecessary leaf wetness and maintain plant nutrition.","Observe the product label and pre-harvest interval."],"prevention":["Use healthy seed and crop rotation.","Remove volunteer potato plants and infected debris.","Avoid plant stress from irregular irrigation or nutrition."]},
+        "late blight": {"name":"Potato Late Blight","problem":"Late blight can rapidly damage leaves and tubers under cool, wet conditions.","treatment":["Remove heavily infected plants or foliage where feasible and manage infected tubers after harvest.","Use only locally registered late-blight fungicides; active ingredients can include mancozeb, chlorothalonil or other approved products depending on the label and resistance program.","Begin preventive protection when disease risk is high and repeat only according to the product label.","Observe the pre-harvest interval."],"prevention":["Use certified seed tubers.","Improve drainage and avoid prolonged leaf wetness.","Scout frequently during favorable weather."]}
+    },
+    "Maize": {
+        "healthy": {"name":"Healthy Maize","problem":"No disease class was identified with the available model.","treatment":["No disease medicine is indicated from this scan.","Continue scouting for leaf diseases and insect damage."],"prevention":["Use healthy seed.","Maintain balanced nutrition and field sanitation."]},
+        "rust": {"name":"Maize Rust","problem":"Rust diseases produce small rust-colored pustules on maize leaves.","treatment":["Scout the crop and confirm the disease before spraying.","Where chemical control is justified, use only a fungicide registered for maize rust; active ingredients such as azoxystrobin or propiconazole may be used in some markets, but the local label is the authority.","Follow label dose, spray interval, worker protection and pre-harvest requirements."],"prevention":["Use adapted/resistant varieties when available.","Avoid unnecessary crop stress and monitor fields early.","Remove volunteer maize where practical."]},
+        "leaf spot": {"name":"Maize Leaf Spot","problem":"Leaf-spot symptoms can have multiple causes, so field confirmation is important.","treatment":["Remove severe debris and improve airflow.","If fungicide treatment is needed, use only a locally registered maize product for the confirmed pathogen and follow the label.","Do not spray blindly when symptoms could be nutrient or weather related."],"prevention":["Rotate crops where practical.","Use healthy seed and balanced nutrition.","Scout lower leaves early."]}
+    },
+    "Chilli": {
+        "healthy": {"name":"Healthy Chilli/Pepper","problem":"No disease class was identified with the available model.","treatment":["No disease medicine is indicated from this scan.","Continue scouting leaves, flowers and fruits."],"prevention":["Use healthy seedlings.","Control weeds and monitor insect vectors."]},
+        "bacterial": {"name":"Chilli/Pepper Bacterial Disease","problem":"Bacterial diseases can cause water-soaked, dark or spreading lesions and fruit damage.","treatment":["Remove severely infected material and avoid spreading contaminated water or tools.","Use only a locally registered bactericide for the confirmed disease; copper-based products are used for some bacterial diseases where legally registered.","Follow the label exactly and do not mix products unless the label permits it."],"prevention":["Use disease-free seedlings.","Avoid working the crop when foliage is wet.","Sanitize tools and reduce splash irrigation."]},
+        "leaf spot": {"name":"Chilli/Pepper Leaf Spot","problem":"Leaf spots may have fungal, bacterial or environmental causes and need field confirmation.","treatment":["Remove severely affected leaves where practical.","If a fungicide is required, use a locally registered chilli/pepper product for the confirmed disease and follow the label.","Improve airflow and avoid overhead irrigation."],"prevention":["Use clean planting material.","Maintain spacing and sanitation.","Scout twice weekly during humid weather."]}
+    }
+}
+
+
+def get_crop_disease_guidance(crop, predicted_label):
+    normalized = normalize_label(predicted_label)
+    crop_data = CROP_DISEASE_GUIDANCE.get(crop, {})
+    if "healthy" in normalized:
+        return crop_data.get("healthy", DISEASE_GUIDANCE["healthy"])
+    disease_keys = ["yellow leaf curl", "mosaic", "leaf mold", "septoria leaf spot", "target spot", "spider mites", "bacterial spot", "northern leaf blight", "gray leaf spot", "cercospora", "common rust", "leaf blight", "late blight", "early blight", "leaf spot", "rust", "bacterial"]
+    for key in disease_keys:
+        if key in normalized and key in crop_data:
+            return crop_data[key]
+        if key in normalized and key in CROP_DISEASE_GUIDANCE.get("_extra", {}):
+            return CROP_DISEASE_GUIDANCE["_extra"][key]
+
+    # Never reuse a disease treatment from a different crop. Build a crop-specific
+    # response from the exact model label, but do not invent a pesticide diagnosis.
+    readable = str(predicted_label).replace("___", " — ").replace("_", " ")
+    return {
+        "name": f"Possible {crop} disease / stress",
+        "problem": "The image model did not provide a crop-specific treatment class with enough certainty.",
+        "treatment": ["Do not apply a disease-specific chemical based only on this result.", "Take 2–3 clear close-up photos of affected and healthy leaves and compare symptoms.", "If symptoms are spreading or severe, confirm the diagnosis with a local agricultural officer or qualified agronomist before treatment."],
+        "prevention": ["Remove severely diseased debris where practical.", "Maintain appropriate irrigation and field sanitation.", "Continue regular scouting."]
+    }
+
+# =========================================================
 # LABEL HELPERS
 # =========================================================
 
@@ -1611,27 +1731,30 @@ nav_map = dict(
 )
 
 
+# =========================================================
+# QUICK ACTION NAVIGATION
+# =========================================================
+# Keep navigation persistent across Streamlit reruns.
+# File upload/camera widgets trigger reruns; the previous one-time
+# quick_page logic was resetting the app back to Home on every upload.
+
+if st.session_state.quick_page != "Home":
+    target_page = st.session_state.quick_page
+    target_label = next(
+        (label for label, internal in nav_map.items() if internal == target_page),
+        None
+    )
+    if target_label is not None:
+        st.session_state.navigation_choice = target_label
+    st.session_state.quick_page = "Home"
+
 selected_nav = st.sidebar.radio(
     tr("navigation"),
     nav_labels,
     key="navigation_choice"
 )
 
-
-page = nav_map[
-    selected_nav
-]
-
-
-# =========================================================
-# QUICK ACTION NAVIGATION
-# =========================================================
-
-if st.session_state.quick_page != "Home":
-
-    page = st.session_state.quick_page
-
-    st.session_state.quick_page = "Home"
+page = nav_map[selected_nav]
 
 if st.session_state.guest_mode:
     page = "Offline Activity"
@@ -1675,9 +1798,24 @@ st.sidebar.info(
 
 
 # =========================================================
+# UNIVERSAL AI ASSISTANCE
+# =========================================================
+def render_universal_ai_help(section_name):
+    with st.expander(f"🤖 AI Assistance — Need help with {section_name}?", expanded=False):
+        st.write("Ask AgriCare AI for crop-specific guidance, explain symptoms, plan the next step, or understand the information on this page.")
+        if st.button("💬 Ask AI Assistant", key=f"universal_ai_{section_name}", use_container_width=True, type="primary"):
+            if st.session_state.get("guest_mode"):
+                st.warning("Please log in to use AI Farming Chat. Guest mode is limited to Offline Activity.")
+            else:
+                st.session_state.quick_page = "AI Farming Chat"
+                st.rerun()
+
+# =========================================================
 # HOME
 
 if page == "Home":
+
+    render_universal_ai_help("this Home page")
 
     # Native Streamlit components are used here instead of raw HTML.
     # This prevents HTML tags from appearing as text in the browser.
@@ -1771,6 +1909,7 @@ if page == "Home":
 
 elif page == "AI Plant Doctor":
 
+    # AI Plant Doctor already contains image-based AI assistance.
     st.title(
         tr("doctor_title")
     )
@@ -2012,21 +2151,24 @@ elif page == "AI Plant Doctor":
                     ):
 
                         prediction = run_prediction(
-                            current_image
+                            current_image,
+                            selected_crop=crop
                         )
 
+                    predicted_label = prediction["label"]
+                    confidence = prediction["confidence"]
 
-                    predicted_label = (
-                        prediction["label"]
-                    )
+                    supported_by_model = ["Maize", "Tomato", "Chilli", "Potato"]
+                    model_supported_for_selected_crop = crop in supported_by_model
 
-                    confidence = (
-                        prediction["confidence"]
-                    )
-
-                    ai_crop = detect_crop_from_label(
-                        predicted_label
-                    )
+                    if model_supported_for_selected_crop and prediction.get("crop_gated"):
+                        # The farmer's selected crop is authoritative for the crop-specific
+                        # disease classifier. Do not compare it with an unrelated raw top class.
+                        ai_crop = crop
+                        crop_match = "Matched — crop-specific AI analysis"
+                    else:
+                        ai_crop = prediction.get("raw_crop", "Unknown")
+                        crop_match = "Not reliably supported by current AI model"
 
 
                     health_score = (
@@ -2045,7 +2187,8 @@ elif page == "AI Plant Doctor":
                     )
 
 
-                    guidance = get_guidance(
+                    guidance = get_crop_disease_guidance(
+                        crop,
                         predicted_label
                     )
 
@@ -2053,28 +2196,6 @@ elif page == "AI Plant Doctor":
                     disease = guidance["name"]
 
 
-                    # -------------------------------------------------
-                    # CROP MATCH
-                    # -------------------------------------------------
-
-                    if ai_crop == "Unknown":
-
-                        crop_match = (
-                            "Could not determine crop"
-                        )
-
-                    elif (
-                        ai_crop.lower()
-                        == crop.lower()
-                    ):
-
-                        crop_match = "Matched"
-
-                    else:
-
-                        crop_match = (
-                            f"Mismatch - AI suggests {ai_crop}"
-                        )
 
 
                     # -------------------------------------------------
@@ -2110,18 +2231,26 @@ elif page == "AI Plant Doctor":
 
                         "confidence": confidence,
 
+                        "reliability": prediction.get("reliability", confidence),
+
+                        "consistency": prediction.get("consistency", 100),
+
+                        "image_quality": prediction.get("image_quality", {}),
+
                         "disease": disease,
 
                         "predicted_label": predicted_label,
 
                         "severity": severity,
 
+                        "problem_detail": guidance.get("problem", ""),
+
                         "management": " ".join(
-                            guidance["management"]
+                            guidance.get("treatment", guidance.get("management", []))
                         ),
 
                         "prevention": " ".join(
-                            guidance["prevention"]
+                            guidance.get("prevention", [])
                         ),
 
                         "top_predictions":
@@ -2182,6 +2311,12 @@ elif page == "AI Plant Doctor":
 
         confidence = data["confidence"]
 
+        reliability = data.get("reliability", confidence)
+
+        consistency = data.get("consistency", 100)
+
+        image_quality = data.get("image_quality", {})
+
         disease = data["disease"]
 
         predicted_label = data["predicted_label"]
@@ -2191,6 +2326,8 @@ elif page == "AI Plant Doctor":
         management = data["management"]
 
         prevention = data["prevention"]
+
+        problem_detail = data.get("problem_detail", "")
 
         top_predictions = data[
             "top_predictions"
@@ -2212,32 +2349,28 @@ elif page == "AI Plant Doctor":
 
 
         # -------------------------------------------------
-        # CONFIDENCE WARNING
+        # RELIABILITY WARNING
         # -------------------------------------------------
 
-        if confidence < 60:
-
+        if reliability < 60:
             st.warning(
-                "⚠️ Low AI confidence. "
-                "Please upload a clear close-up leaf image "
-                "and consider expert verification before "
-                "applying treatment."
+                "⚠️ **Low detection reliability.** The model is not stable enough to treat this result as a diagnosis. "
+                "Retake a sharp close-up photo showing the whole leaf and affected area."
             )
-
-        elif confidence < 75:
-
+        elif reliability < 75:
             st.info(
-                "ℹ️ Moderate AI confidence. "
-                "A clearer image or expert verification "
-                "can improve reliability."
+                "ℹ️ **Moderate detection reliability.** Compare the visible symptoms with the result and verify before chemical treatment."
             )
-
         else:
-
             st.success(
-                "✅ Good AI confidence. "
-                "Still verify the result in real field conditions."
+                "✅ **Good screening reliability.** This is still an AI-assisted screening result, not a guaranteed field diagnosis."
             )
+
+        qtext = image_quality.get("quality", "Unknown") if isinstance(image_quality, dict) else "Unknown"
+        st.caption(f"📷 Image quality: {qtext}  •  🔄 Original/flip consistency: {consistency}%  •  🧠 Classifier confidence: {confidence}%")
+
+        if consistency < 70:
+            st.warning("🔄 The AI gave noticeably different results after a small image change. Treat this scan as uncertain and retake the photo.")
 
 
         # -------------------------------------------------
@@ -2313,6 +2446,8 @@ elif page == "AI Plant Doctor":
 
             st.write("**CONFIDENCE**")
             st.markdown(f"### {confidence}%")
+            st.write("**DETECTION RELIABILITY")
+            st.markdown(f"### {reliability}%")
 
         # -------------------------------------------------
         # CROP MISMATCH
@@ -2361,11 +2496,17 @@ elif page == "AI Plant Doctor":
 
         if crop not in supported_by_model:
 
-            st.info(
-                f"ℹ️ The current AI model does not have a "
-                f"dedicated trained class for **{crop}**. "
-                f"Treat this prediction as experimental and "
-                f"seek expert verification."
+            st.warning(
+                f"⚠️ **{crop} is not a dedicated class in the current image model.** "
+                "AgriCare AI will NOT claim that a disease from another crop is your disease. "
+                "For this crop, use the AI Farming Chat with symptoms and a clear image, "
+                "and confirm any chemical treatment with a local agricultural expert."
+            )
+        else:
+            st.success(
+                f"✅ Crop-specific AI mode active for **{crop}**. "
+                "Only disease/healthy classes belonging to this selected crop are compared, "
+                "so unrelated crop classes are excluded from the final result."
             )
 
 
@@ -2462,15 +2603,11 @@ elif page == "AI Plant Doctor":
             tr("management")
         )
 
+        if problem_detail:
+            st.info("🧾 **What this means:** " + problem_detail)
 
-        for item in DISEASE_GUIDANCE.get(
-            normalize_label(predicted_label),
-            DISEASE_GUIDANCE["default"]
-        )["management"]:
-
-            st.write(
-                "• " + item
-            )
+        for item in guidance.get("treatment", guidance.get("management", [])):
+            st.write("• " + item)
 
 
         # -------------------------------------------------
@@ -2482,14 +2619,8 @@ elif page == "AI Plant Doctor":
         )
 
 
-        for item in DISEASE_GUIDANCE.get(
-            normalize_label(predicted_label),
-            DISEASE_GUIDANCE["default"]
-        )["prevention"]:
-
-            st.write(
-                "• " + item
-            )
+        for item in guidance.get("prevention", []):
+            st.write("• " + item)
 
 
         # -------------------------------------------------
@@ -2733,6 +2864,8 @@ elif page == "AI Plant Doctor":
 
 elif page == "History":
 
+    render_universal_ai_help("your farming history")
+
     st.title(
         tr("history_title")
     )
@@ -2916,6 +3049,8 @@ elif page == "History":
 # =========================================================
 
 elif page == "New Farming":
+
+    render_universal_ai_help("your new farming plan")
 
     st.title(
         tr("new_title")
@@ -3126,6 +3261,8 @@ elif page == "New Farming":
 # =========================================================
 
 elif page == "Offline Activity":
+
+    render_universal_ai_help("the offline learning guide")
 
     st.title(tr("offline_title"))
 
@@ -3574,6 +3711,12 @@ elif page == "AI Farming Chat":
     st.markdown("---")
     st.subheader("🌾 Tell the assistant about your crop")
 
+    chat_language = st.selectbox(
+        "🌐 AI Chat Language",
+        ["English", "తెలుగు", "हिंदी"],
+        key="chat_language"
+    )
+
     c1, c2, c3 = st.columns(3)
     with c1:
         chat_crop = st.selectbox(
@@ -3678,7 +3821,7 @@ elif page == "AI Farming Chat":
         }
     }
 
-    def farming_answer(question, crop, stage, duration):
+    def farming_answer(question, crop, stage, duration, language="English"):
         q = question.lower().strip()
         crop_key = crop.lower() if crop != "Not specified" else ""
         context = []
@@ -3797,7 +3940,63 @@ elif page == "AI Farming Chat":
         if duration != "Not specified" and duration in ["1–3 weeks", "More than 3 weeks"]:
             answer += "\n⏱️ Because the problem has persisted, compare affected vs. healthy plants and consider local expert verification."
 
+        if language == "తెలుగు":
+            return telugu_chat_answer(question, crop, stage, duration)
+
         return answer
+
+    def telugu_chat_answer(question, crop, stage, duration):
+        q = question.lower().strip()
+        crop_text = crop if crop != "Not specified" else "మీ పంట"
+        stage_text = stage if stage != "Not specified" else "పంట దశ"
+        duration_text = duration if duration != "Not specified" else "వ్యవధి"
+
+        if any(w in q for w in ["yellow", "yellowing", "pale", "chlorosis"]):
+            return (f"🌿 **{crop_text} ఆకులు పసుపు రంగులోకి మారుతున్నాయా?**\n\n"
+                    "సాధ్యమైన కారణాలు: నీటి ఒత్తిడి, పోషక లోపం, వేర్ల సమస్య, పురుగులు లేదా వ్యాధి.\n\n"
+                    "**ముందుగా ఇవి పరిశీలించండి:**\n"
+                    "1. వేర్ల దగ్గర నేల చాలా పొడిగా లేదా నీరు నిలిచిపోయిందా చూడండి.\n"
+                    "2. పాత ఆకులా, కొత్త ఆకులా ముందుగా పసుపు అవుతున్నాయో చూడండి.\n"
+                    "3. ఆకుల కింద పురుగులు, గుడ్లు లేదా జాలాలు ఉన్నాయా చూడండి.\n"
+                    "4. మచ్చలు, ముడతలు, వంకరలు లేదా అసాధారణ ఆకారాలు ఉన్నాయా చూడండి.\n"
+                    "5. కారణం తెలియకుండా ఎరువులు లేదా మందులు వేయవద్దు.\n\n"
+                    "📷 కనిపించే లక్షణం ఉంటే **AI Plant Doctor**లో స్పష్టమైన ఆకుల ఫోటోను పరీక్షించండి.")
+        if any(w in q for w in ["pest", "insect", "aphid", "whitefly", "thrips", "caterpillar", "worm", "mite", "bug"]):
+            return (f"🐛 **{crop_text} పురుగు నియంత్రణ సూచనలు**\n\n"
+                    "1. ఆకుల కింద భాగం, కొత్త కొమ్మలు, పువ్వులు మరియు పెరుగుతున్న భాగాలను పరిశీలించండి.\n"
+                    "2. గుడ్లు, లార్వా, జాలాలు, తేనె వంటి అంటుకునే పదార్థం లేదా కొరికిన నష్టాన్ని చూడండి.\n"
+                    "3. ఎక్కువగా దెబ్బతిన్న భాగాలను సాధ్యమైనంతవరకు తొలగించండి.\n"
+                    "4. కలుపు మొక్కలు మరియు పంట అవశేషాలను నియంత్రించండి.\n"
+                    "5. ముందుగా పర్యవేక్షణ మరియు సమగ్ర పురుగు నియంత్రణ (IPM) పద్ధతులను ఉపయోగించండి.\n"
+                    "6. మందు అవసరమైతే ఆ పంట మరియు పురుగుకు స్థానికంగా నమోదు చేసిన మందును మాత్రమే లేబుల్ ప్రకారం వాడండి.\n\n"
+                    "📷 పురుగు స్పష్టమైన క్లోజ్-అప్ ఫోటోను ఇవ్వడం ద్వారా గుర్తింపును మెరుగుపరచవచ్చు.")
+        if any(w in q for w in ["water", "watering", "irrigation", "dry", "wilting", "moisture"]):
+            return (f"💧 **{crop_text} నీటి నిర్వహణ**\n\n"
+                    "• నీరు పెట్టే ముందు వేర్ల ప్రాంతంలోని నేల తేమను పరిశీలించండి.\n"
+                    "• ఎక్కువ కాలం ఎండిపోవడం మరియు నీరు నిలవడం రెండింటినీ నివారించండి.\n"
+                    "• సాధ్యమైనప్పుడు ఆకులపై కాకుండా వేర్ల ప్రాంతానికి నీరు ఇవ్వండి.\n"
+                    f"• ప్రస్తుత పంట దశ: {stage_text}. వాతావరణం మరియు నేల రకాన్ని కూడా పరిగణించండి.\n"
+                    "• నేల తడిగా ఉన్నప్పటికీ వాడిపోతే వేర్లు, పురుగులు మరియు వ్యాధిని పరిశీలించండి.")
+        if any(w in q for w in ["disease", "spot", "rust", "blight", "mildew", "rot", "mosaic", "lesion", "fungus", "fungal"]):
+            return (f"🦠 **{crop_text} వ్యాధి మొదటి చర్యలు**\n\n"
+                    "1. ప్రభావిత మరియు ఆరోగ్యకరమైన మొక్కలను పోల్చి చూడండి.\n"
+                    "2. లక్షణాలు వేగంగా వ్యాపిస్తున్నాయా, మొదట ఏ భాగంలో వచ్చాయో గమనించండి.\n"
+                    "3. గాలి ప్రసరణ మెరుగుపరచండి మరియు అవసరం లేని ఆకుల తడిని తగ్గించండి.\n"
+                    "4. సోకిన అవశేషాలను సాధ్యమైనంతవరకు తొలగించండి.\n"
+                    "5. ఆకుల రూపాన్ని చూసి మాత్రమే రసాయన మందు పిచికారీ చేయవద్దు.\n"
+                    "6. **AI Plant Doctor**లో ఫోటో పరీక్ష చేసి, తీవ్రమైన కేసులకు వ్యవసాయ నిపుణుడితో నిర్ధారించండి.\n\n"
+                    f"📅 పంట దశ: {stage_text} | సమస్య వ్యవధి: {duration_text}")
+        if any(w in q for w in ["soil", "fertilizer", "nutrient", "manure", "nitrogen", "phosphorus", "potassium", "npk"]):
+            return (f"🌾 **{crop_text} నేల మరియు పోషక సూచనలు**\n\n"
+                    "• పెద్ద ఎరువుల నిర్ణయం తీసుకునే ముందు నేల పరీక్ష చేయించుకోవడం మంచిది.\n"
+                    "• పంట మరియు పెరుగుదల దశకు సరిపోయే పోషక నిర్వహణను పాటించండి.\n"
+                    "• మంచి డ్రైనేజ్ మరియు తగిన సేంద్రియ పదార్థాన్ని నిర్వహించండి.\n"
+                    "• అధిక ఎరువు వేయడం వల్ల ఎప్పుడూ మంచి దిగుబడి రాదు.\n"
+                    "• లోపం అనుమానం ఉంటే ఆరోగ్యకరమైన మరియు ప్రభావిత మొక్కలను పోల్చండి.")
+        return (f"🤖 **AgriCare AI — {crop_text} కోసం సూచన**\n\n"
+                "మీ ప్రశ్నకు ఖచ్చితమైన సమాధానం ఇవ్వడానికి పంట, పెరుగుదల దశ, లక్షణాలు, నీటి పరిస్థితి మరియు సమస్య ఎంతకాలంగా ఉందో పరిశీలించాలి.\n\n"
+                "📷 కనిపించే సమస్య అయితే స్పష్టమైన ఆకుల ఫోటోను **AI Plant Doctor**లో పరీక్షించండి.\n"
+                "⚠️ AI సూచన ప్రాథమిక సహాయం మాత్రమే. రసాయన మందు వాడే ముందు స్థానికంగా నమోదు చేసిన ఉత్పత్తి లేబుల్ మరియు వ్యవసాయ నిపుణుల సలహాను పాటించండి.")
 
     # ---------------------------------------------------------
     # ASK + SIMPLE CHAT HISTORY
@@ -3832,7 +4031,8 @@ elif page == "AI Farming Chat":
                 user_question,
                 chat_crop,
                 chat_stage,
-                chat_duration
+                chat_duration,
+                chat_language
             )
             st.session_state.chat_history.append({
                 "question": user_question.strip(),
@@ -3847,6 +4047,34 @@ elif page == "AI Farming Chat":
             st.success(item["answer"])
     else:
         st.caption("Your questions and AI responses will appear here.")
+
+    # ---------------------------------------------------------
+    # VOICE ASSISTANCE FOR AI CHAT
+    # ---------------------------------------------------------
+    if st.session_state.chat_history:
+        st.markdown("---")
+        st.subheader("🔊 AI Chat Voice Assistance")
+        voice_chat_lang = st.selectbox(
+            "Voice language",
+            ["English", "తెలుగు", "हिंदी"],
+            index=["English", "తెలుగు", "हिंदी"].index(chat_language),
+            key="chat_voice_language"
+        )
+        if st.button("🎧 Read latest AI answer aloud", use_container_width=True, key="chat_voice_button"):
+            latest_answer = st.session_state.chat_history[-1]["answer"]
+            # Remove markdown symbols for cleaner speech.
+            speech_text = re.sub(r"[*_#`•]", "", latest_answer)
+            speech_text = re.sub(r"\s+", " ", speech_text).strip()
+            voice_code = {"English": "en", "తెలుగు": "te", "हिंदी": "hi"}[voice_chat_lang]
+            try:
+                with st.spinner("🔊 Creating AI voice..."):
+                    tts = gTTS(text=speech_text, lang=voice_code, slow=False)
+                    audio_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+                    tts.save(audio_file.name)
+                    audio_file.close()
+                st.audio(audio_file.name, format="audio/mp3")
+            except Exception as e:
+                st.error(f"Voice assistance is temporarily unavailable: {e}")
 
     # ---------------------------------------------------------
     # SAFETY / NEXT STEP

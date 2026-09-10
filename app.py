@@ -10,8 +10,10 @@ import hmac
 import secrets
 import re
 
+import cv2
+import numpy as np
 import torch
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
 
@@ -91,7 +93,6 @@ def read_uploaded_image(uploaded_file):
 
         # Correct phone-camera orientation when EXIF data is present.
         try:
-            from PIL import ImageOps
             image = ImageOps.exif_transpose(image)
         except Exception:
             pass

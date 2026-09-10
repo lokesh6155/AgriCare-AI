@@ -1377,69 +1377,170 @@ DISEASE_GUIDANCE = {
 
 
 # =========================================================
-# CROP-SPECIFIC AI TREATMENT DATABASE
+# CROP-SPECIFIC MEDICINE & MANAGEMENT DATABASE
 # =========================================================
-# Treatment is selected by BOTH crop and disease. Product names/doses vary by
-# country and formulation, so we provide active-ingredient examples and always
-# require the farmer to follow the locally registered product label.
+# This database is intentionally active-ingredient based instead of brand based.
+# Product names, formulations, label claims, doses, PHI and permitted crops vary
+# by country/state/formulation. The app therefore tells the farmer to follow the
+# current locally registered product label. ICAR/NRCIPM guidance is used as a
+# reference for several entries.
 
 CROP_DISEASE_GUIDANCE = {
     "Tomato": {
         "healthy": {
-            "name": "Healthy Tomato",
-            "problem": "No disease class was identified with the available model.",
-            "treatment": ["No disease medicine is indicated from this scan.", "Continue regular scouting and balanced irrigation.", "Maintain good airflow and remove dead plant material."],
-            "prevention": ["Use healthy seedlings.", "Avoid prolonged leaf wetness.", "Monitor leaves, stems and fruits twice a week."]
+            "name": "Healthy Tomato", "problem": "No disease class was identified with the available model.",
+            "medicine_type": "No medicine indicated", "active_ingredients": [],
+            "treatment": ["No disease medicine is indicated from this scan.", "Continue regular scouting, balanced irrigation and good airflow."],
+            "prevention": ["Use healthy seedlings.", "Remove diseased crop debris.", "Avoid prolonged leaf wetness."]
         },
         "early blight": {
-            "name": "Tomato Early Blight",
-            "problem": "A fungal disease that commonly produces dark target-like spots, often beginning on older leaves.",
-            "treatment": ["Remove badly infected leaves and dispose of them away from the field.", "For registered fungicide control, products containing active ingredients such as chlorothalonil, mancozeb or an appropriate locally registered fungicide may be used according to the label.", "Rotate fungicide groups where the label permits; do not repeatedly use the same mode of action.", "Avoid overhead irrigation and keep foliage dry when possible."],
-            "prevention": ["Use clean planting material.", "Keep adequate plant spacing and airflow.", "Remove crop debris after harvest and rotate crops where practical."]
+            "name": "Tomato Early Blight", "problem": "Fungal disease producing dark target-like leaf spots, often on older leaves.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Chlorothalonil", "Mancozeb", "Copper oxychloride"],
+            "treatment": ["Remove badly infected leaves where practical.", "Use a locally registered tomato fungicide containing an appropriate active ingredient such as chlorothalonil, mancozeb or copper oxychloride, only according to its current label.", "Rotate fungicide groups where the label permits."],
+            "prevention": ["Maintain plant spacing and airflow.", "Avoid overhead irrigation.", "Remove infected debris after harvest."]
         },
         "late blight": {
-            "name": "Tomato Late Blight",
-            "problem": "A rapidly spreading disease favored by cool, wet conditions; dark water-soaked lesions may occur on leaves and fruit.",
-            "treatment": ["Remove and safely dispose of heavily infected plant material.", "For registered control, active ingredients such as mancozeb, chlorothalonil or other locally approved late-blight fungicides may be options depending on the label and resistance program.", "Start control early when disease risk is high rather than waiting for severe infection.", "Do not eat or sell produce contrary to the product label and observe the stated pre-harvest interval."],
-            "prevention": ["Improve airflow and drainage.", "Avoid prolonged leaf wetness.", "Scout frequently during cool, wet weather."]
+            "name": "Tomato Late Blight", "problem": "A rapidly spreading disease favored by cool, wet conditions.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Mancozeb", "Metalaxyl + Mancozeb", "Cymoxanil + Mancozeb", "Chlorothalonil"],
+            "treatment": ["Remove heavily infected material where practical.", "Use only a locally registered late-blight fungicide. ICAR advisories include copper oxychloride and metalaxyl 4% + mancozeb 64% for tomato disease management.", "Start protection early when disease risk is high and follow the label and resistance-management instructions."],
+            "prevention": ["Improve airflow and drainage.", "Avoid prolonged leaf wetness.", "Scout frequently during cool and wet weather."]
         },
-        "leaf spot": {
-            "name": "Tomato Leaf Spot",
-            "problem": "Leaf-spot symptoms can be caused by several pathogens and can resemble nutrient or environmental stress.",
-            "treatment": ["Remove severely affected leaves where practical.", "Use only a fungicide/bactericide registered for the confirmed tomato problem; active ingredients and rates must follow the local label.", "Improve airflow and avoid splashing water between plants."],
-            "prevention": ["Sanitize tools and remove infected debris.", "Use disease-free planting material.", "Rotate away from solanaceous crops where practical."]
+        "bacterial spot": {
+            "name": "Tomato Bacterial Spot", "problem": "Bacterial lesions can appear as small dark or water-soaked spots on leaves and fruit.",
+            "medicine_type": "Bactericide / protective treatment", "active_ingredients": ["Copper-based products where registered"],
+            "treatment": ["Remove severely affected material where practical.", "Use only a locally registered bactericide for tomato bacterial spot.", "Do not mix products unless the label specifically permits the mixture."],
+            "prevention": ["Use disease-free planting material.", "Avoid splash irrigation.", "Sanitize tools and avoid working wet foliage."]
+        },
+        "leaf mold": {
+            "name": "Tomato Leaf Mold", "problem": "Leaf mold is favored by high humidity and poor airflow.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Use a locally registered tomato fungicide for leaf mold"],
+            "treatment": ["Improve ventilation and reduce leaf wetness.", "Remove heavily infected leaves.", "Use only a locally registered fungicide after confirming the disease."],
+            "prevention": ["Increase spacing and airflow.", "Avoid unnecessary overhead irrigation."]
+        },
+        "septoria leaf spot": {
+            "name": "Tomato Septoria Leaf Spot", "problem": "Small circular leaf spots can enlarge and cause premature leaf loss.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Mancozeb", "Chlorothalonil where registered"],
+            "treatment": ["Remove infected lower leaves and crop debris.", "Use a locally registered tomato fungicide according to the label.", "Avoid splashing soil onto foliage."],
+            "prevention": ["Use clean seedlings.", "Rotate crops where practical.", "Maintain field sanitation."]
+        },
+        "target spot": {
+            "name": "Tomato Target Spot", "problem": "Target-like concentric lesions may occur on tomato leaves and fruit.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Use a locally registered fungicide for target spot"],
+            "treatment": ["Remove badly affected material.", "Use only a locally registered fungicide for confirmed target spot and rotate modes of action according to the label.", "Improve airflow and reduce leaf wetness."],
+            "prevention": ["Maintain spacing and sanitation.", "Scout early during humid weather."]
+        },
+        "spider mites": {
+            "name": "Tomato Spider Mites", "problem": "Mites can cause fine stippling, yellowing and webbing, especially on leaf undersides.",
+            "medicine_type": "Miticide / acaricide", "active_ingredients": ["Fenpyroximate", "Spiromesifen", "Propargite where registered"],
+            "treatment": ["Inspect leaf undersides before treatment.", "Conserve beneficial predators where possible.", "If treatment is required, use only an acaricide registered for tomato mites and follow its label."],
+            "prevention": ["Avoid severe plant water stress.", "Scout leaf undersides regularly.", "Avoid unnecessary broad-spectrum insecticide use that can disrupt beneficial mites and insects."]
+        },
+        "yellow leaf curl": {
+            "name": "Tomato Yellow Leaf Curl Virus", "problem": "Virus symptoms may include leaf curling, yellowing and stunting; whiteflies can spread the virus.",
+            "medicine_type": "No curative medicine; vector management", "active_ingredients": ["No chemical cure for established virus", "Use only locally registered whitefly-control products when required"],
+            "treatment": ["There is no curative pesticide that reverses an established viral infection.", "Remove severely affected plants where practical.", "Manage whitefly vectors using integrated pest management and only locally registered products when needed."],
+            "prevention": ["Use healthy seedlings and resistant varieties where available.", "Monitor whiteflies early.", "Control weeds and volunteer hosts."]
+        },
+        "mosaic": {
+            "name": "Tomato Mosaic Virus", "problem": "Mosaic viruses can cause mottling, distortion and reduced growth.",
+            "medicine_type": "No curative medicine; sanitation and vector management", "active_ingredients": ["No chemical cure for established virus"],
+            "treatment": ["There is no curative pesticide that restores a virus-infected plant.", "Remove severely infected plants where practical.", "Sanitize hands and tools and manage relevant insect vectors."],
+            "prevention": ["Use certified healthy planting material.", "Control weeds and alternate hosts.", "Sanitize tools between plants."]
         }
     },
-    # Additional classes returned by the PlantVillage-style model.
-    "_extra": {
-        "bacterial spot": {"name":"Bacterial Spot","problem":"Bacterial leaf spot can cause small dark or water-soaked lesions that enlarge under favorable conditions.","treatment":["Remove severely affected leaves where practical and avoid spreading contaminated water or tools.","Use only a locally registered bactericide for the confirmed crop disease; copper-based products are used for some bacterial diseases where registered.","Follow the product label and do not mix chemicals unless the label permits."],"prevention":["Use disease-free planting material.","Avoid overhead irrigation and work in dry foliage when possible."]},
-        "leaf mold": {"name":"Tomato Leaf Mold","problem":"Leaf mold commonly affects tomato foliage under high humidity and poor airflow.","treatment":["Improve ventilation and reduce prolonged leaf wetness.","Remove heavily infected leaves where practical.","Use a locally registered tomato fungicide only when the disease is confirmed and follow the label."],"prevention":["Improve spacing and airflow.","Avoid unnecessary overhead irrigation."]},
-        "septoria leaf spot": {"name":"Tomato Septoria Leaf Spot","problem":"Small circular leaf spots can enlarge and cause premature leaf loss.","treatment":["Remove infected lower leaves and crop debris where practical.","Use a locally registered tomato fungicide such as an approved protectant according to the label.","Avoid splashing soil onto foliage."],"prevention":["Rotate crops where practical.","Use clean seedlings and field sanitation."]},
-        "target spot": {"name":"Tomato Target Spot","problem":"Target-like concentric lesions can occur on tomato leaves and fruit.","treatment":["Remove badly affected material where practical.","Use only a locally registered fungicide for tomato target spot and rotate modes of action according to the label.","Improve airflow and reduce leaf wetness."],"prevention":["Maintain spacing and sanitation.","Scout early, especially in humid weather."]},
-        "spider mites": {"name":"Tomato Spider Mites","problem":"Spider mites can cause fine stippling, yellowing and sometimes webbing on leaves.","treatment":["Check leaf undersides with a close-up view before treatment.","Use non-chemical measures and conserve beneficial predators where possible.","If an acaricide is needed, use only a product registered for tomato mites and follow the label; do not spray an insecticide that is ineffective against mites."],"prevention":["Avoid severe plant water stress.","Scout leaf undersides regularly."]},
-        "yellow leaf curl": {"name":"Tomato Yellow Leaf Curl Virus","problem":"Virus symptoms can include upward leaf curling, yellowing and stunting; whiteflies can spread the virus.","treatment":["There is no curative chemical treatment that reverses an established viral infection.","Remove severely affected plants where practical to reduce sources of infection.","Manage whitefly vectors using integrated pest management and only locally registered products when needed."],"prevention":["Use healthy seedlings and resistant varieties where available.","Control volunteer hosts and monitor whiteflies early."]},
-        "mosaic": {"name":"Tomato Mosaic Virus","problem":"Mosaic viruses can cause mottled leaves, distortion and reduced growth; infected material can spread the virus.","treatment":["There is no curative pesticide that restores a virus-infected plant.","Remove severely infected plants where practical and sanitize hands/tools after handling.","Control insect vectors when relevant and use only registered products."],"prevention":["Use certified healthy planting material.","Control weeds/alternate hosts and sanitize tools."]},
-        "northern leaf blight": {"name":"Maize Northern Leaf Blight","problem":"Long cigar-shaped lesions can expand across maize leaves.","treatment":["Scout the crop and confirm symptoms before spraying.","If chemical control is justified, use only a locally registered maize fungicide and follow its label and resistance guidance.","Observe pre-harvest restrictions."],"prevention":["Use resistant/tolerant varieties where available.","Rotate crops and manage infected residue where practical."]},
-        "gray leaf spot": {"name":"Maize Gray Leaf Spot","problem":"Gray/tan rectangular lesions can expand along maize leaves, especially under humid conditions.","treatment":["Confirm the disease before chemical control.","Use only locally registered maize fungicides for gray leaf spot and follow the label.","Maintain balanced crop nutrition and avoid unnecessary leaf wetness."],"prevention":["Use tolerant varieties where available.","Rotate crops and manage residue."]},
-        "cercospora": {"name":"Maize Cercospora Gray Leaf Spot","problem":"Cercospora leaf spot can reduce green leaf area and yield when severe.","treatment":["Use only a locally registered fungicide if the disease is confirmed and economic control is justified.","Rotate fungicide modes of action according to the label.","Monitor the lower canopy early."],"prevention":["Use tolerant varieties.","Rotate crops and manage infected residue."]},
-        "common rust": {"name":"Maize Common Rust","problem":"Small reddish-brown rust pustules can develop on maize leaves.","treatment":["Confirm rust before treatment.","Where control is justified, use only a locally registered maize fungicide such as an approved triazole/strobilurin product according to the label.","Follow all label and pre-harvest requirements."],"prevention":["Use resistant varieties where available.","Scout early and avoid severe crop stress."]}
-    },
+
     "Potato": {
-        "healthy": {"name":"Healthy Potato","problem":"No disease class was identified with the available model.","treatment":["No disease medicine is indicated from this scan.","Continue scouting and maintain balanced irrigation."],"prevention":["Use certified healthy seed tubers.","Maintain good field drainage and regular scouting."]},
-        "early blight": {"name":"Potato Early Blight","problem":"Early blight can produce dark lesions with concentric rings, especially on older foliage.","treatment":["Remove badly affected foliage where practical.","Registered fungicides containing active ingredients such as chlorothalonil, mancozeb or an approved alternative may be used according to the potato label and local resistance guidance.","Avoid unnecessary leaf wetness and maintain plant nutrition.","Observe the product label and pre-harvest interval."],"prevention":["Use healthy seed and crop rotation.","Remove volunteer potato plants and infected debris.","Avoid plant stress from irregular irrigation or nutrition."]},
-        "late blight": {"name":"Potato Late Blight","problem":"Late blight can rapidly damage leaves and tubers under cool, wet conditions.","treatment":["Remove heavily infected plants or foliage where feasible and manage infected tubers after harvest.","Use only locally registered late-blight fungicides; active ingredients can include mancozeb, chlorothalonil or other approved products depending on the label and resistance program.","Begin preventive protection when disease risk is high and repeat only according to the product label.","Observe the pre-harvest interval."],"prevention":["Use certified seed tubers.","Improve drainage and avoid prolonged leaf wetness.","Scout frequently during favorable weather."]}
+        "healthy": {
+            "name": "Healthy Potato", "problem": "No disease class was identified with the available model.",
+            "medicine_type": "No medicine indicated", "active_ingredients": [],
+            "treatment": ["No disease medicine is indicated from this scan.", "Continue scouting and maintain good drainage."],
+            "prevention": ["Use certified healthy seed tubers.", "Maintain field sanitation and drainage."]
+        },
+        "early blight": {
+            "name": "Potato Early Blight", "problem": "Dark lesions with concentric rings often develop on older foliage.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Mancozeb", "Chlorothalonil where registered"],
+            "treatment": ["Remove badly affected foliage where practical.", "Use a locally registered potato fungicide according to the current label.", "Rotate fungicide groups where permitted."],
+            "prevention": ["Use healthy seed.", "Rotate crops where practical.", "Avoid prolonged leaf wetness and plant stress."]
+        },
+        "late blight": {
+            "name": "Potato Late Blight", "problem": "Late blight can rapidly damage leaves and tubers under cool, wet conditions.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Mancozeb", "Cymoxanil", "Dimethomorph", "Fluopicolide + Propamocarb", "Chlorothalonil"],
+            "treatment": ["Remove heavily infected foliage where feasible and manage infected tubers after harvest.", "Use only locally registered late-blight fungicides. ICAR sources report mancozeb, cymoxanil/dimethomorph-based products and fluopicolide + propamocarb programs as management options in appropriate settings.", "Follow the label, resistance-management guidance and pre-harvest interval."],
+            "prevention": ["Use certified seed tubers.", "Improve drainage.", "Scout frequently during cool, wet weather."]
+        }
     },
+
     "Maize": {
-        "healthy": {"name":"Healthy Maize","problem":"No disease class was identified with the available model.","treatment":["No disease medicine is indicated from this scan.","Continue scouting for leaf diseases and insect damage."],"prevention":["Use healthy seed.","Maintain balanced nutrition and field sanitation."]},
-        "rust": {"name":"Maize Rust","problem":"Rust diseases produce small rust-colored pustules on maize leaves.","treatment":["Scout the crop and confirm the disease before spraying.","Where chemical control is justified, use only a fungicide registered for maize rust; active ingredients such as azoxystrobin or propiconazole may be used in some markets, but the local label is the authority.","Follow label dose, spray interval, worker protection and pre-harvest requirements."],"prevention":["Use adapted/resistant varieties when available.","Avoid unnecessary crop stress and monitor fields early.","Remove volunteer maize where practical."]},
-        "leaf spot": {"name":"Maize Leaf Spot","problem":"Leaf-spot symptoms can have multiple causes, so field confirmation is important.","treatment":["Remove severe debris and improve airflow.","If fungicide treatment is needed, use only a locally registered maize product for the confirmed pathogen and follow the label.","Do not spray blindly when symptoms could be nutrient or weather related."],"prevention":["Rotate crops where practical.","Use healthy seed and balanced nutrition.","Scout lower leaves early."]}
+        "healthy": {
+            "name": "Healthy Maize", "problem": "No disease class was identified with the available model.",
+            "medicine_type": "No medicine indicated", "active_ingredients": [],
+            "treatment": ["No disease medicine is indicated from this scan.", "Continue scouting for leaf diseases and insect damage."],
+            "prevention": ["Use healthy seed.", "Maintain balanced nutrition and field sanitation."]
+        },
+        "northern leaf blight": {
+            "name": "Maize Northern Leaf Blight", "problem": "Long cigar-shaped lesions can expand across maize leaves.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Use a locally registered maize fungicide for northern leaf blight"],
+            "treatment": ["Confirm the disease before spraying.", "Use only a locally registered maize fungicide and follow its resistance-management and pre-harvest requirements.", "Do not spray when symptoms may be caused by nutrition or weather stress."],
+            "prevention": ["Use tolerant/resistant varieties where available.", "Rotate crops and manage infected residue where practical."]
+        },
+        "gray leaf spot": {
+            "name": "Maize Gray Leaf Spot", "problem": "Gray/tan rectangular lesions can expand along maize leaves, especially in humid conditions.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Azoxystrobin or other locally registered maize fungicide"],
+            "treatment": ["Confirm the disease before chemical control.", "Use only a locally registered maize fungicide according to the label.", "Rotate modes of action where the label permits."],
+            "prevention": ["Use tolerant varieties.", "Rotate crops.", "Manage infected residue and monitor lower leaves early."]
+        },
+        "cercospora": {
+            "name": "Maize Cercospora Gray Leaf Spot", "problem": "Cercospora leaf spot can reduce green leaf area and yield when severe.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Use a locally registered maize fungicide for Cercospora leaf spot"],
+            "treatment": ["Use chemical control only when the disease is confirmed and control is justified.", "Rotate fungicide modes of action according to the label.", "Monitor the lower canopy early."],
+            "prevention": ["Use tolerant varieties.", "Rotate crops and manage infected residue."]
+        },
+        "common rust": {
+            "name": "Maize Common Rust", "problem": "Small reddish-brown rust pustules can develop on maize leaves.",
+            "medicine_type": "Fungicide", "active_ingredients": ["Azoxystrobin", "Propiconazole where registered"],
+            "treatment": ["Confirm rust before treatment.", "Where control is justified, use a locally registered maize fungicide such as an approved strobilurin/triazole product according to the label.", "Follow all worker-protection and pre-harvest requirements."],
+            "prevention": ["Use resistant varieties where available.", "Scout early and avoid severe crop stress."]
+        }
     },
+
     "Chilli": {
-        "healthy": {"name":"Healthy Chilli/Pepper","problem":"No disease class was identified with the available model.","treatment":["No disease medicine is indicated from this scan.","Continue scouting leaves, flowers and fruits."],"prevention":["Use healthy seedlings.","Control weeds and monitor insect vectors."]},
-        "bacterial": {"name":"Chilli/Pepper Bacterial Disease","problem":"Bacterial diseases can cause water-soaked, dark or spreading lesions and fruit damage.","treatment":["Remove severely infected material and avoid spreading contaminated water or tools.","Use only a locally registered bactericide for the confirmed disease; copper-based products are used for some bacterial diseases where legally registered.","Follow the label exactly and do not mix products unless the label permits it."],"prevention":["Use disease-free seedlings.","Avoid working the crop when foliage is wet.","Sanitize tools and reduce splash irrigation."]},
-        "leaf spot": {"name":"Chilli/Pepper Leaf Spot","problem":"Leaf spots may have fungal, bacterial or environmental causes and need field confirmation.","treatment":["Remove severely affected leaves where practical.","If a fungicide is required, use a locally registered chilli/pepper product for the confirmed disease and follow the label.","Improve airflow and avoid overhead irrigation."],"prevention":["Use clean planting material.","Maintain spacing and sanitation.","Scout twice weekly during humid weather."]}
+        "healthy": {
+            "name": "Healthy Chilli/Pepper", "problem": "No disease class was identified with the available model.",
+            "medicine_type": "No medicine indicated", "active_ingredients": [],
+            "treatment": ["No disease medicine is indicated from this scan.", "Continue scouting leaves, flowers and fruits."],
+            "prevention": ["Use healthy seedlings.", "Control weeds and monitor insect vectors."]
+        },
+        "bacterial": {
+            "name": "Chilli/Pepper Bacterial Spot", "problem": "Bacterial disease can cause dark or water-soaked lesions and fruit damage.",
+            "medicine_type": "Bactericide / protective treatment", "active_ingredients": ["Copper-based products where registered"],
+            "treatment": ["Remove severely infected material where practical.", "Use only a locally registered bactericide for the confirmed disease.", "Follow the label and do not mix products unless the label permits."],
+            "prevention": ["Use disease-free seedlings.", "Avoid working wet foliage.", "Sanitize tools and reduce splash irrigation."]
+        },
+        "leaf spot": {
+            "name": "Chilli Leaf Spot", "problem": "Leaf spots can have fungal, bacterial or environmental causes and need field confirmation.",
+            "medicine_type": "Fungicide / protective treatment", "active_ingredients": ["Chlorothalonil where registered", "Copper-based products where registered"],
+            "treatment": ["Remove severely affected leaves where practical.", "ICAR advisories list chlorothalonil for chilli leaf-spot management; use only a locally registered formulation and follow its current label.", "Improve airflow and avoid overhead irrigation."],
+            "prevention": ["Use clean planting material.", "Maintain spacing and sanitation.", "Scout regularly during humid weather."]
+        },
+        "spider mites": {
+            "name": "Chilli Mites", "problem": "Mites can cause curling, bronzing or distorted young leaves.",
+            "medicine_type": "Miticide / acaricide", "active_ingredients": ["Fenpyroximate where registered", "Spiromesifen where registered"],
+            "treatment": ["Inspect young leaves and leaf undersides.", "Use an acaricide only when mites are confirmed and the product is registered for chilli.", "Follow the current label and protect beneficial organisms."],
+            "prevention": ["Avoid severe water stress.", "Scout young growth frequently."]
+        },
+        "yellow leaf curl": {
+            "name": "Chilli Leaf Curl Virus", "problem": "Leaf curl is commonly associated with viral infection and insect vectors such as whiteflies.",
+            "medicine_type": "No curative medicine; vector management", "active_ingredients": ["No chemical cure for established virus", "Use only locally registered vector-control products when required"],
+            "treatment": ["There is no curative pesticide for an established viral infection.", "Remove severely affected plants where practical.", "Manage whitefly vectors through integrated pest management and locally registered products when necessary."],
+            "prevention": ["Use healthy seedlings.", "Monitor vectors early.", "Remove weeds and volunteer hosts."]
+        }
     }
 }
+
+# Backward-compatible aliases for the PlantVillage-style model labels.
+CROP_DISEASE_GUIDANCE["Tomato"]["yellow leaf curl virus"] = CROP_DISEASE_GUIDANCE["Tomato"]["yellow leaf curl"]
+CROP_DISEASE_GUIDANCE["Tomato"]["mosaic virus"] = CROP_DISEASE_GUIDANCE["Tomato"]["mosaic"]
+CROP_DISEASE_GUIDANCE["Chilli"]["bacterial spot"] = CROP_DISEASE_GUIDANCE["Chilli"]["bacterial"]
 
 
 def get_crop_disease_guidance(crop, predicted_label):
@@ -1447,21 +1548,29 @@ def get_crop_disease_guidance(crop, predicted_label):
     crop_data = CROP_DISEASE_GUIDANCE.get(crop, {})
     if "healthy" in normalized:
         return crop_data.get("healthy", DISEASE_GUIDANCE["healthy"])
-    disease_keys = ["yellow leaf curl", "mosaic", "leaf mold", "septoria leaf spot", "target spot", "spider mites", "bacterial spot", "northern leaf blight", "gray leaf spot", "cercospora", "common rust", "leaf blight", "late blight", "early blight", "leaf spot", "rust", "bacterial"]
+
+    # Check the most specific model labels first.
+    disease_keys = [
+        "yellow leaf curl virus", "yellow leaf curl", "mosaic virus", "mosaic",
+        "bacterial spot", "leaf mold", "septoria leaf spot", "target spot",
+        "spider mites", "northern leaf blight", "gray leaf spot", "cercospora",
+        "common rust", "late blight", "early blight", "leaf spot", "rust", "bacterial"
+    ]
     for key in disease_keys:
         if key in normalized and key in crop_data:
             return crop_data[key]
-        if key in normalized and key in CROP_DISEASE_GUIDANCE.get("_extra", {}):
-            return CROP_DISEASE_GUIDANCE["_extra"][key]
 
-    # Never reuse a disease treatment from a different crop. Build a crop-specific
-    # response from the exact model label, but do not invent a pesticide diagnosis.
-    readable = str(predicted_label).replace("___", " — ").replace("_", " ")
     return {
-        "name": f"Possible {crop} disease / stress",
+        "name": "Uncertain crop-specific result",
         "problem": "The image model did not provide a crop-specific treatment class with enough certainty.",
-        "treatment": ["Do not apply a disease-specific chemical based only on this result.", "Take 2–3 clear close-up photos of affected and healthy leaves and compare symptoms.", "If symptoms are spreading or severe, confirm the diagnosis with a local agricultural officer or qualified agronomist before treatment."],
-        "prevention": ["Remove severely diseased debris where practical.", "Maintain appropriate irrigation and field sanitation.", "Continue regular scouting."]
+        "medicine_type": "Do not apply disease-specific medicine yet",
+        "active_ingredients": [],
+        "treatment": [
+            "Do not apply a disease-specific chemical based only on this uncertain result.",
+            "Retake 2–3 clear close-up photos of affected and healthy leaves.",
+            "If symptoms are spreading or severe, confirm the diagnosis with a local agricultural officer or qualified agronomist before treatment."
+        ],
+        "prevention": ["Continue field scouting.", "Maintain sanitation and avoid unnecessary pesticide use."]
     }
 
 # =========================================================
@@ -2246,6 +2355,10 @@ elif page == "AI Plant Doctor":
 
                         "problem_detail": guidance.get("problem", ""),
 
+                        "medicine_type": guidance.get("medicine_type", ""),
+
+                        "active_ingredients": guidance.get("active_ingredients", []),
+
                         "management": " ".join(
                             guidance.get("treatment", guidance.get("management", []))
                         ),
@@ -2609,6 +2722,31 @@ elif page == "AI Plant Doctor":
 
         for item in guidance.get("treatment", guidance.get("management", [])):
             st.write("• " + item)
+
+        # -------------------------------------------------
+        # MEDICINE DATABASE
+        # -------------------------------------------------
+        st.markdown("---")
+        st.subheader("💊 Recommended Medicine / Active Ingredients")
+
+        medicine_type = guidance.get("medicine_type", "Crop-specific management")
+        active_ingredients = guidance.get("active_ingredients", [])
+
+        st.info(f"**Medicine type:** {medicine_type}")
+
+        if active_ingredients:
+            st.write("**Suggested active ingredients / options:**")
+            for ingredient in active_ingredients:
+                st.write("• " + ingredient)
+        else:
+            st.write("• No disease-specific medicine is recommended from this scan.")
+
+        st.warning(
+            "⚠️ Medicine safety: Active ingredients shown here are guidance, not a prescription. "
+            "Use only a product currently registered for the selected crop and confirmed problem. "
+            "Follow the product label for concentration, dose, spray interval, PPE and pre-harvest interval. "
+            "Do not mix products unless the label permits it."
+        )
 
 
         # -------------------------------------------------

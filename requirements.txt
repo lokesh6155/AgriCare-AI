@@ -1,9 +1,11 @@
 streamlit
-gtts
-transformers
+pandas
+numpy
+Pillow
+opencv-python-headless
+matplotlib
+gTTS
 torch
 torchvision
-Pillow
-numpy
-pandas
-requests
+transformers
+huggingface-hub
